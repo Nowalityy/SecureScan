@@ -362,6 +362,10 @@ export default function Home() {
                 <p className="text-sm text-white/60">
                   Plus de scans, plus d’automatisations, plus de vitesse.
                 </p>
+                <div className="flex items-baseline gap-2 text-white">
+                  <span className="text-3xl font-semibold">99€</span>
+                  <span className="text-sm text-white/60">/ mois</span>
+                </div>
               </CardHeader>
               <CardContent className="space-y-4 text-sm text-white/70">
                 <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
@@ -390,6 +394,9 @@ export default function Home() {
                 <p className="text-sm text-white/60">
                   Gouvernance, sécurité avancée et support dédié.
                 </p>
+                <div className="flex items-baseline gap-2 text-white">
+                  <span className="text-3xl font-semibold">Sur devis</span>
+                </div>
               </CardHeader>
               <CardContent className="space-y-4 text-sm text-white/70">
                 <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
