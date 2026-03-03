@@ -89,6 +89,7 @@ export default function ReportPage() {
     severity: SEVERITY_LABELS[v.severity]?.label ?? v.severity,
     file: v.file,
     detail: v.description,
+    branch: v.branch,
     icon: severityIcon(v.severity),
     tone: SEVERITY_LABELS[v.severity]?.tone ?? "text-white/70",
   }));
@@ -217,6 +218,11 @@ export default function ReportPage() {
                         >
                           {finding.severity}
                         </Badge>
+                        {finding.branch && (
+                          <Badge className="border border-white/10 bg-white/5 text-xs text-white/50" variant="secondary">
+                            {finding.branch}
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-xs text-white/60">{finding.file}</p>
                       <p className="text-sm text-white/70">{finding.detail}</p>

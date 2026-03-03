@@ -1,18 +1,10 @@
 import path from "path";
 import fs from "fs";
-import { runSemgrep } from "@/lib/scanners/semgrep";
 import { runNpmAudit } from "@/lib/scanners/npmAudit";
-import { runTruffleHog } from "@/lib/scanners/trufflehog";
-import {
-  parseSemgrepJson,
-  parseNpmAuditJson,
-  parseTruffleHogJson,
-} from "@/lib/parser";
-import {
-  mapSemgrepToOwasp,
-  mapNpmAuditToOwasp,
-  mapTruffleHogToOwasp,
-} from "@/lib/owaspMapper";
+import { runSecretsScanner } from "@/lib/scanners/secretsScanner";
+import { runCodeScanner } from "@/lib/scanners/codeScanner";
+import { parseNpmAuditJson } from "@/lib/parser";
+import { mapNpmAuditToOwasp } from "@/lib/owaspMapper";
 import { computeScore } from "@/lib/score";
 import type { Vulnerability } from "@/lib/types";
 
@@ -22,50 +14,54 @@ export interface ScanResult {
   vulnerabilities: Vulnerability[];
 }
 
-// Lance Semgrep, npm audit et TruffleHog en parallèle, agrège les findings et calcule le score.
-export async function runSecurityScan(repoPath: string): Promise<ScanResult> {
+// Lance les 3 scanners JS natifs + npm audit en parallèle, agrège les findings.
+export async function runSecurityScan(repoPath: string, branch?: string): Promise<ScanResult> {
   const resolvedPath = path.resolve(repoPath);
-  if (!fs.existsSync(resolvedPath)) {
-    throw new Error("repoPath does not exist");
-  }
-  if (!fs.statSync(resolvedPath).isDirectory()) {
-    throw new Error("repoPath is not a directory");
-  }
+  if (!fs.existsSync(resolvedPath)) throw new Error("repoPath does not exist");
+  if (!fs.statSync(resolvedPath).isDirectory()) throw new Error("repoPath is not a directory");
 
-  const [semgrepSettled, npmSettled, truffleSettled] = await Promise.allSettled([
-    runSemgrep(resolvedPath),
+  const tag = branch ?? "default";
+  console.log(`[orchestrator][${tag}] Démarrage scan dans ${resolvedPath}`);
+
+  // Les scanners JS sont synchrones — on les wrap en Promise pour paralléliser avec npm audit
+  const [secretsSettled, codeSettled, npmSettled] = await Promise.allSettled([
+    Promise.resolve(runSecretsScanner(resolvedPath)),
+    Promise.resolve(runCodeScanner(resolvedPath)),
     runNpmAudit(resolvedPath),
-    runTruffleHog(resolvedPath),
   ]);
 
   const vulnerabilities: Vulnerability[] = [];
 
-  // Agrégation des résultats des 3 outils (stdout JSON → Vulnerability[])
-  if (semgrepSettled.status === "fulfilled") {
-    const list = parseSemgrepJson(semgrepSettled.value.stdout);
-    for (const item of list) {
-      vulnerabilities.push(mapSemgrepToOwasp(item));
+  if (secretsSettled.status === "fulfilled") {
+    console.log(`[orchestrator][${tag}] secrets-scanner findings: ${secretsSettled.value.length}`);
+    for (const v of secretsSettled.value) {
+      vulnerabilities.push({ ...v, branch });
     }
+  } else {
+    console.error(`[orchestrator][${tag}] secrets-scanner rejeté:`, secretsSettled.reason);
+  }
+
+  if (codeSettled.status === "fulfilled") {
+    console.log(`[orchestrator][${tag}] code-scanner findings: ${codeSettled.value.length}`);
+    for (const v of codeSettled.value) {
+      vulnerabilities.push({ ...v, branch });
+    }
+  } else {
+    console.error(`[orchestrator][${tag}] code-scanner rejeté:`, codeSettled.reason);
   }
 
   if (npmSettled.status === "fulfilled") {
+    console.log(`[orchestrator][${tag}] npm audit stdout length: ${npmSettled.value.stdout.length} | exitCode: ${npmSettled.value.exitCode}`);
     const list = parseNpmAuditJson(npmSettled.value.stdout);
+    console.log(`[orchestrator][${tag}] npm audit findings: ${list.length}`);
     for (const item of list) {
-      vulnerabilities.push(mapNpmAuditToOwasp(item));
+      vulnerabilities.push({ ...mapNpmAuditToOwasp(item), branch });
     }
-  }
-
-  if (truffleSettled.status === "fulfilled") {
-    const list = parseTruffleHogJson(truffleSettled.value.stdout);
-    for (const item of list) {
-      vulnerabilities.push(mapTruffleHogToOwasp(item));
-    }
+  } else {
+    console.error(`[orchestrator][${tag}] npm audit rejeté:`, npmSettled.reason);
   }
 
   const score = computeScore(vulnerabilities);
-  return {
-    score,
-    totalFindings: vulnerabilities.length,
-    vulnerabilities,
-  };
+  console.log(`[orchestrator][${tag}] Total findings: ${vulnerabilities.length} | Score: ${score}`);
+  return { score, totalFindings: vulnerabilities.length, vulnerabilities };
 }
