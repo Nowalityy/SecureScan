@@ -172,8 +172,7 @@ export async function exportToPdf(scan: ScanResponse, repoUrl?: string): Promise
   });
 
   // ── Footer sur chaque page ─────────────────────────────────────────────────
-  const totalPages = (doc as jsPDF & { internal: { getNumberOfPages: () => number } })
-    .internal.getNumberOfPages();
+  const totalPages = doc.getNumberOfPages();
   for (let p = 1; p <= totalPages; p++) {
     doc.setPage(p);
     doc.setFontSize(7);
