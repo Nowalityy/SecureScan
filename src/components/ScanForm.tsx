@@ -39,9 +39,10 @@ export default function ScanForm() {
         alert(data.error || data.details || "Erreur lors du scan");
         return;
       }
-      // Stocker le rapport pour la page /report (lecture depuis sessionStorage)
+      // Stocker le rapport et l'URL pour la page /report (lecture depuis sessionStorage)
       if (typeof sessionStorage !== "undefined") {
         sessionStorage.setItem(REPORT_KEY, JSON.stringify(data));
+        sessionStorage.setItem("securescan-url", trimmed);
       }
       router.push("/report");
     } catch {

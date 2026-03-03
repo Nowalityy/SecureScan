@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { exportToPdf } from "@/lib/pdfExport";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -41,6 +42,8 @@ function severityIcon(severity: string) {
 export default function ReportPage() {
   const [scan, setScan] = useState<ScanResponse | null>(null);
   const [ready, setReady] = useState(false);
+  const [repoUrl, setRepoUrl] = useState<string | undefined>(undefined);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   useEffect(() => {
     try {
@@ -51,11 +54,25 @@ export default function ReportPage() {
           setScan(data);
         }
       }
+      const url = typeof window !== "undefined" ? sessionStorage.getItem("securescan-url") ?? undefined : undefined;
+      setRepoUrl(url);
     } catch {
       // ignore
     }
     setReady(true);
   }, []);
+
+  async function handleExportPdf() {
+    if (!scan) return;
+    setPdfLoading(true);
+    try {
+      await exportToPdf(scan, repoUrl);
+    } catch (e) {
+      console.error("PDF export error:", e);
+    } finally {
+      setPdfLoading(false);
+    }
+  }
 
   if (!ready) {
     return (
@@ -274,10 +291,12 @@ export default function ReportPage() {
               <CardContent>
                 <Button
                   type="button"
-                  className="cursor-pointer bg-white/10 text-white hover:bg-white/15"
+                  onClick={handleExportPdf}
+                  disabled={pdfLoading}
+                  className="cursor-pointer bg-white/10 text-white hover:bg-white/15 disabled:opacity-50"
                 >
                   <FileText className="h-4 w-4" />
-                  <span>Exporter en PDF</span>
+                  <span>{pdfLoading ? "Génération…" : "Exporter en PDF"}</span>
                 </Button>
               </CardContent>
             </Card>
