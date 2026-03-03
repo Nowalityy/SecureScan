@@ -15,7 +15,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import type { ScanResponse } from "@/lib/types";
 
 const REPORT_KEY = "securescan-report";
@@ -111,7 +110,6 @@ export default function ReportPage() {
             </div>
           </div>
           <div className="flex items-center gap-3 text-sm text-white/60">
-            <Badge className="bg-white/10 text-white hover:bg-white/10">Rapport de scan</Badge>
             <Button asChild className="bg-red-500 text-white hover:bg-red-400">
               <Link href="/">Nouveau scan</Link>
             </Button>
@@ -267,38 +265,25 @@ export default function ReportPage() {
                 ))}
               </CardContent>
             </Card>
+
+            <Card className="border-white/10 bg-white/5 text-white">
+              <CardHeader>
+                <CardTitle className="text-lg">Export PDF</CardTitle>
+                <p className="text-sm text-white/60">Telecharger le rapport complet.</p>
+              </CardHeader>
+              <CardContent>
+                <Button
+                  type="button"
+                  className="cursor-pointer bg-white/10 text-white hover:bg-white/15"
+                >
+                  <FileText className="h-4 w-4" />
+                  <span>Exporter en PDF</span>
+                </Button>
+              </CardContent>
+            </Card>
           </div>
         </section>
 
-        <section className="mt-12 rounded-3xl border border-white/10 bg-gradient-to-br from-white/5 to-black/30 p-10">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h2 className="text-2xl font-semibold text-white">Plan d&apos;action recommande</h2>
-              <p className="mt-2 text-sm text-white/60">Priorisation pour passer du scan a l&apos;amelioration.</p>
-            </div>
-            <Button asChild className="bg-red-500 text-white hover:bg-red-400">
-              <Link href="/">Nouveau scan</Link>
-            </Button>
-          </div>
-          <Separator className="my-8 bg-white/10" />
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="rounded-2xl border border-white/10 bg-black/30 p-4 text-white">
-              <p className="text-xs uppercase tracking-[0.2em] text-white/50">24h</p>
-              <p className="mt-2 text-lg font-semibold">Rotation secrets</p>
-              <p className="mt-2 text-sm text-white/60">Revoquer les tokens exposes et activer un vault.</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-black/30 p-4 text-white">
-              <p className="text-xs uppercase tracking-[0.2em] text-white/50">7j</p>
-              <p className="mt-2 text-lg font-semibold">Hardening applicatif</p>
-              <p className="mt-2 text-sm text-white/60">CSP + headers + validation des inputs.</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-black/30 p-4 text-white">
-              <p className="text-xs uppercase tracking-[0.2em] text-white/50">30j</p>
-              <p className="mt-2 text-lg font-semibold">Suivi continu</p>
-              <p className="mt-2 text-sm text-white/60">Scans hebdo et seuils d&apos;alerte.</p>
-            </div>
-          </div>
-        </section>
       </div>
     </div>
   );
