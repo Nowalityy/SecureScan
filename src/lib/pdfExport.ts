@@ -124,12 +124,11 @@ export async function exportToPdf(scan: ScanResponse, repoUrl?: string): Promise
     v.file + (v.line ? `:${v.line}` : ""),
     v.branch ?? "-",
     v.description,
-    v.tool,
   ]);
 
   autoTable(doc, {
     startY: y,
-    head: [["Sévérité", "OWASP", "Fichier", "Branche", "Description", "Outil"]],
+    head: [["Sévérité", "OWASP", "Fichier", "Branche", "Description"]],
     body: rows,
     margin: { left: margin, right: margin },
     styles: {
@@ -156,7 +155,6 @@ export async function exportToPdf(scan: ScanResponse, repoUrl?: string): Promise
       2: { cellWidth: 38 },
       3: { cellWidth: 22 },
       4: { cellWidth: "auto" },
-      5: { cellWidth: 22 },
     },
     didParseCell(data) {
       if (data.column.index === 0 && data.section === "body") {
