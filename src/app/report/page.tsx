@@ -10,7 +10,9 @@ import {
   GitBranch,
   Lock,
   ShieldCheck,
+  Sparkles,
   TriangleAlert,
+  X,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -27,11 +29,103 @@ const SEVERITY_LABELS: Record<string, { label: string; tone: string; bg: string 
   LOW: { label: "Faible", tone: "text-emerald-300", bg: "bg-emerald-500/15" },
 };
 
-const recommendations = [
-  { title: "Regenerer les secrets et utiliser un vault", detail: "Remplacer les valeurs hardcodees par des variables d'environnement." },
-  { title: "Ajouter une couche de validation", detail: "Introduire un schema Zod pour normaliser les inputs API." },
-  { title: "Mettre a jour les dependances critiques", detail: "Planifier un upgrade Axios + audit via npm audit." },
-];
+interface Recommendation {
+  title: string;
+  detail: string;
+  priority: number; // plus bas = plus prioritaire
+}
+
+function buildRecommendations(vulnerabilities: ScanResponse["vulnerabilities"]): Recommendation[] {
+  const seen = new Set<string>();
+  const recs: Recommendation[] = [];
+
+  function add(key: string, title: string, detail: string, priority: number) {
+    if (!seen.has(key)) {
+      seen.add(key);
+      recs.push({ title, detail, priority });
+    }
+  }
+
+  for (const v of vulnerabilities) {
+    const d = v.description.toLowerCase();
+    const cat = v.owaspCategory;
+
+    // ── A04 Cryptographic Failures ──
+    if (d.includes("md5") || d.includes("sha-1")) {
+      add("hash", "Remplacer les algorithmes de hachage obsolètes", "MD5 et SHA-1 sont cryptographiquement cassés. Utiliser SHA-256 ou bcrypt/argon2 pour les mots de passe.", 1);
+    }
+    if (d.includes("aes-ecb")) {
+      add("aes", "Passer en mode AES-GCM ou AES-CBC avec IV aléatoire", "Le mode ECB est déterministe et expose des patterns dans les données chiffrées.", 1);
+    }
+    if (d.includes("clé cryptographique") || d.includes("hardcoded") && cat === "A04 Cryptographic Failures") {
+      add("hardkey", "Sortir les clés cryptographiques du code source", "Utiliser des variables d'environnement ou un secret manager (Vault, AWS Secrets Manager).", 1);
+    }
+    if (d.includes("math.random")) {
+      add("random", "Utiliser crypto.randomBytes() pour les tokens de sécurité", "Math.random() n'est pas cryptographiquement sûr.", 2);
+    }
+    if (d.includes("base64") && d.includes("prévisible")) {
+      add("b64token", "Générer des tokens avec une entropie suffisante", "Buffer.from(...).toString('base64') sans source aléatoire produit des tokens prévisibles. Utiliser crypto.randomBytes(32).", 2);
+    }
+
+    // ── A01 Broken Access Control ──
+    if (d.includes("idor") || d.includes("params")) {
+      add("idor", "Vérifier que l'utilisateur est propriétaire de la ressource", "Toujours valider que req.user.id === ressource.userId avant de retourner des données.", 1);
+    }
+    if (d.includes("isadmin") || d.includes("isauthenticated")) {
+      add("auth-bypass", "Supprimer les contournements d'authentification hardcodés", "Ne jamais fixer isAdmin=true en dur. Vérifier les rôles depuis la session ou le JWT.", 1);
+    }
+    if (d.includes("credentials") && d.includes("réponse")) {
+      add("creds-leak", "Ne jamais exposer des credentials dans une réponse API", "Retirer les mots de passe, tokens et clés des réponses JSON. Logger uniquement des identifiants opaques.", 1);
+    }
+
+    // ── A02 Security Misconfiguration ──
+    if (d.includes("cors")) {
+      add("cors", "Restreindre CORS aux origines autorisées", "Remplacer Access-Control-Allow-Origin: * par une liste blanche explicite.", 2);
+    }
+    if (d.includes("process.env") && d.includes("exposition")) {
+      add("env-leak", "Ne jamais exposer process.env complet", "N'exposer que les variables explicitement nécessaires. Jamais d'objet env entier dans une réponse.", 1);
+    }
+    if (d.includes("ssl") || d.includes("tls") || d.includes("rejectunauthorized")) {
+      add("ssl", "Réactiver la vérification des certificats SSL/TLS", "rejectUnauthorized: false expose aux attaques MITM. À n'utiliser que localement.", 2);
+    }
+    if (d.includes("debug")) {
+      add("debug", "Désactiver le mode debug en production", "Les informations de debug peuvent exposer des stacktraces et des données internes.", 3);
+    }
+    if (d.includes("http") && !d.includes("https")) {
+      add("http", "Forcer HTTPS sur toutes les connexions", "Les URLs HTTP transmettent les données en clair. Utiliser HTTPS partout.", 3);
+    }
+
+    // ── A03 Injection ──
+    if (d.includes("sql")) {
+      add("sql", "Utiliser des requêtes paramétrées ou un ORM", "Ne jamais construire des requêtes SQL par concaténation. Utiliser Prisma, Drizzle ou pg.query($1, [val]).", 1);
+    }
+    if (d.includes("eval")) {
+      add("eval", "Supprimer tous les appels à eval()", "eval() exécute du code arbitraire. Remplacer par des alternatives sûres (JSON.parse, Function avec sandbox).", 1);
+    }
+    if (d.includes("exec") || d.includes("spawn") || d.includes("shell")) {
+      add("shell", "Valider et échapper les entrées avant toute exécution shell", "Utiliser execFile() avec des arguments séparés plutôt que exec() avec une chaîne concaténée.", 1);
+    }
+    if (d.includes("innerhtml") || d.includes("document.write") || d.includes("xss")) {
+      add("xss", "Échapper les données avant insertion dans le DOM", "Utiliser textContent au lieu de innerHTML. En React, éviter dangerouslySetInnerHTML.", 2);
+    }
+
+    // ── A03 Supply Chain ──
+    if (cat === "A03 Software Supply Chain Failures") {
+      add("deps", "Mettre à jour les dépendances vulnérables", "Lancer npm audit fix ou mettre à jour manuellement les packages signalés.", 2);
+    }
+
+    // ── A06 Insecure Design ──
+    if (d.includes("todo") || d.includes("fixme")) {
+      add("todo", "Résoudre les TODO/FIXME de sécurité", "Les commentaires de sécurité non résolus indiquent des failles connues non corrigées.", 3);
+    }
+    if (d.includes("console.log")) {
+      add("console", "Retirer les console.log de données sensibles", "Les logs en production peuvent être capturés. Utiliser un logger structuré avec niveaux configurables.", 3);
+    }
+  }
+
+  // Tri par priorité, max 5 recommandations
+  return recs.sort((a, b) => a.priority - b.priority).slice(0, 5);
+}
 
 function severityIcon(severity: string) {
   if (severity === "CRITICAL" || severity === "HIGH") return TriangleAlert;
@@ -44,6 +138,10 @@ export default function ReportPage() {
   const [ready, setReady] = useState(false);
   const [repoUrl, setRepoUrl] = useState<string | undefined>(undefined);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [aiLoadingIndex, setAiLoadingIndex] = useState<number | null>(null);
+  const [aiModal, setAiModal] = useState<{ fixedCode: string; explanation: string; filePath: string; vulnDescription: string; branch?: string } | null>(null);
+  const [prLoading, setPrLoading] = useState(false);
+  const [prUrl, setPrUrl] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -61,6 +159,57 @@ export default function ReportPage() {
     }
     setReady(true);
   }, []);
+
+  async function handleAiFix(index: number) {
+    if (!scan || !repoUrl) return;
+    const vuln = scan.vulnerabilities[index];
+    setAiLoadingIndex(index);
+    try {
+      const res = await fetch("/api/fix-with-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repoUrl,
+          filePath: vuln.file,
+          branch: vuln.branch?.split(", ")[0], // prend la première branche si plusieurs
+          vulnerabilities: [vuln],
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Erreur IA");
+      setAiModal({ fixedCode: data.fixedCode, explanation: data.explanation, filePath: vuln.file, vulnDescription: vuln.description, branch: vuln.branch?.split(", ")[0] });
+      setPrUrl(null);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Erreur lors de la correction IA");
+    } finally {
+      setAiLoadingIndex(null);
+    }
+  }
+
+  async function handleCreatePr() {
+    if (!aiModal || !repoUrl) return;
+    setPrLoading(true);
+    try {
+      const res = await fetch("/api/create-fix-pr", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repoUrl,
+          filePath: aiModal.filePath,
+          branch: aiModal.branch,
+          fix: { fixedCode: aiModal.fixedCode, explanation: aiModal.explanation },
+          vulnerabilityDescription: aiModal.vulnDescription,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Erreur PR");
+      setPrUrl(data.prUrl);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Erreur lors de la création de la PR");
+    } finally {
+      setPrLoading(false);
+    }
+  }
 
   async function handleExportPdf() {
     if (!scan) return;
@@ -100,6 +249,8 @@ export default function ReportPage() {
     return { label, value, tone, bg };
   });
 
+  const recommendations = buildRecommendations(scan.vulnerabilities);
+
   const topFindings = scan.vulnerabilities.map((v, i) => ({
     title: v.owaspCategory,
     severity: SEVERITY_LABELS[v.severity]?.label ?? v.severity,
@@ -108,6 +259,7 @@ export default function ReportPage() {
     branch: v.branch,
     icon: severityIcon(v.severity),
     tone: SEVERITY_LABELS[v.severity]?.tone ?? "text-white/70",
+    index: i,
   }));
 
   return (
@@ -223,9 +375,9 @@ export default function ReportPage() {
                     key={i}
                     className="flex items-start gap-3 rounded-xl border border-white/10 bg-black/30 p-4"
                   >
-                    <finding.icon className={`mt-1 h-5 w-5 ${finding.tone}`} />
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-3">
+                    <finding.icon className={`mt-1 h-5 w-5 shrink-0 ${finding.tone}`} />
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="text-sm font-semibold text-white">{finding.title}</span>
                         <Badge
                           className="border border-white/10 bg-white/5 text-xs text-white/70"
@@ -241,6 +393,16 @@ export default function ReportPage() {
                       </div>
                       <p className="text-xs text-white/60">{finding.file}</p>
                       <p className="text-sm text-white/70">{finding.detail}</p>
+                      {repoUrl && (
+                        <button
+                          onClick={() => handleAiFix(finding.index)}
+                          disabled={aiLoadingIndex === finding.index}
+                          className="mt-2 flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/70 transition hover:bg-white/10 disabled:opacity-50"
+                        >
+                          <Sparkles className="h-3.5 w-3.5 text-violet-400" />
+                          {aiLoadingIndex === finding.index ? "Correction en cours…" : "Corriger via IA"}
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))
@@ -274,12 +436,19 @@ export default function ReportPage() {
                 <CardTitle className="text-lg">Recommandations</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {recommendations.map((item) => (
-                  <div key={item.title} className="rounded-xl border border-white/10 bg-black/30 p-4">
-                    <p className="text-sm font-semibold text-white">{item.title}</p>
-                    <p className="mt-1 text-sm text-white/60">{item.detail}</p>
+                {recommendations.length === 0 ? (
+                  <div className="flex items-start gap-3 rounded-xl border border-white/10 bg-black/30 p-4">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+                    <p className="text-sm text-white/70">Aucune recommandation — aucune faille détectée.</p>
                   </div>
-                ))}
+                ) : (
+                  recommendations.map((item) => (
+                    <div key={item.title} className="rounded-xl border border-white/10 bg-black/30 p-4">
+                      <p className="text-sm font-semibold text-white">{item.title}</p>
+                      <p className="mt-1 text-sm text-white/60">{item.detail}</p>
+                    </div>
+                  ))
+                )}
               </CardContent>
             </Card>
 
@@ -304,6 +473,69 @@ export default function ReportPage() {
         </section>
 
       </div>
+
+      {/* Modale correction IA */}
+      {aiModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="relative flex max-h-[90vh] w-full max-w-3xl flex-col rounded-2xl border border-white/10 bg-[#0f0f0f] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-violet-400" />
+                <span className="text-sm font-semibold text-white">Correction IA</span>
+                <span className="text-xs text-white/40">{aiModal.filePath}</span>
+              </div>
+              <button
+                onClick={() => setAiModal(null)}
+                className="rounded-lg p-1.5 text-white/50 transition hover:bg-white/10 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-6 space-y-4">
+              <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-4">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-violet-300">Explication</p>
+                <p className="text-sm text-white/80">{aiModal.explanation}</p>
+              </div>
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-white/40">Code corrigé</p>
+                <pre className="overflow-x-auto rounded-xl border border-white/10 bg-black/60 p-4 text-xs text-green-300 whitespace-pre-wrap">{aiModal.fixedCode}</pre>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 px-6 py-4">
+              <div className="flex items-center gap-3">
+                {prUrl ? (
+                  <a
+                    href={prUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm text-violet-300 transition hover:bg-violet-500/20"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Voir la PR ouverte
+                  </a>
+                ) : repoUrl ? (
+                  <button
+                    onClick={handleCreatePr}
+                    disabled={prLoading}
+                    className="flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm text-violet-300 transition hover:bg-violet-500/20 disabled:opacity-50"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    {prLoading ? "Création de la PR…" : "Créer une PR"}
+                  </button>
+                ) : null}
+              </div>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(aiModal.fixedCode);
+                }}
+                className="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/70 transition hover:bg-white/10"
+              >
+                Copier le code
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
